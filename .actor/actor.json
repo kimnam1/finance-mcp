@@ -1,9 +1,9 @@
 {
     "actorSpecification": 1,
     "name": "finance-mcp-server",
-    "title": "Finance MCP Server — 39 Tools, No API Key Required",
-    "description": "Comprehensive financial data MCP server for Claude and other AI assistants. 39 tools covering Forex (ECB), Crypto (Binance/CoinGecko), Macro Economics (World Bank + FRED), Stocks, ETFs, Portfolio Analytics, Earnings Calendar, and Market Sentiment. Zero API keys required for 34 tools.",
-    "version": "1.1",
+    "title": "Finance MCP Server — 117 Tools, Most Require No API Key",
+    "description": "Comprehensive financial data MCP server. 117 tools: Forex, Crypto, Macro, SEC EDGAR, Options, Institutional Holdings, Dark Pool, Earnings, Dividends, Screener, and more. Most tools require no API keys.",
+    "version": "4.6",
     "buildTag": "latest",
     "categories": ["AI", "FINANCE"],
     "defaultMemoryMbytes": 256,
@@ -12,5 +12,6 @@
     "readme": "./ACTOR.md",
     "input": "./input_schema.json",
     "usesStandbyMode": true,
-    "webServerMcpPath": "/mcp"
+    "webServerMcpPath": "/mcp",
+    "payPerEvent": "./pay_per_event.json"
 }
