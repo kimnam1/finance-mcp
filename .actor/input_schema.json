@@ -1,0 +1,14 @@
+{
+  "title": "Finance MCP Server Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "fred_api_key": {
+      "title": "FRED API Key (optional)",
+      "type": "string",
+      "description": "Free API key from fred.stlouisfed.org — enables 5 US Federal Reserve macro data tools (Fed funds rate, CPI, PCE, M2, unemployment). Get one free at https://fred.stlouisfed.org/docs/api/api_key.html. Server works without it.",
+      "editor": "textfield",
+      "default": ""
+    }
+  }
+}

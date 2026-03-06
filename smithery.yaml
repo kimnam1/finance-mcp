@@ -1,0 +1,29 @@
+# smithery.yaml — Finance MCP Server
+# Smithery (smithery.ai) 등록 설정 파일
+# 참고: https://smithery.ai/docs/config
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      fred_api_key:
+        type: string
+        title: FRED API Key (Optional)
+        description: >
+          Free API key from fred.stlouisfed.org.
+          Enables 5 additional FRED macro tools (Fed Funds Rate, CPI, PCE, M2, Unemployment).
+          Get yours free at https://fred.stlouisfed.org/docs/api/api_key.html
+    required: []
+  commandFunction: |-
+    (config) => {
+      const env = {};
+      if (config.fred_api_key) {
+        env.FRED_API_KEY = config.fred_api_key;
+      }
+      return {
+        command: "python3",
+        args: ["server.py"],
+        env: env
+      };
+    }
