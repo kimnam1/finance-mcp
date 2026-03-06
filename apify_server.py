@@ -14975,3 +14975,214 @@ async def get_sector_momentum_vs_spy(period_days: int = 63) -> dict:
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_short_interest_trend(ticker: str) -> dict:
+    """
+    Analyze short interest trend for a stock: short % of float, days-to-cover,
+    month-over-month change, and composite squeeze risk score.
+    Returns squeeze risk classification and strategy guide.
+    No API key required.
+    """
+    await Actor.charge(event_name="advanced_tool")
+    try:
+        import yfinance as yf
+        stock = yf.Ticker(ticker.upper())
+        info = stock.info
+
+        short_pct = info.get("shortPercentOfFloat", 0) or 0
+        shares_short = info.get("sharesShort", 0) or 0
+        shares_short_prev = info.get("sharesShortPriorMonth", 0) or 0
+        shares_float = info.get("floatShares", 0) or 0
+        shares_outstanding = info.get("sharesOutstanding", 0) or 0
+        short_date = info.get("dateShortInterest", None)
+        avg_volume = info.get("averageVolume", 0) or 0
+        beta = info.get("beta", 1.0) or 1.0
+
+        dtc = (shares_short / avg_volume) if avg_volume > 0 else 0
+        if shares_short_prev > 0:
+            mom_change = ((shares_short - shares_short_prev) / shares_short_prev) * 100
+        else:
+            mom_change = 0
+
+        spf = short_pct * 100 if short_pct < 1 else short_pct
+        if spf >= 30:
+            short_float_label = "HEAVILY_SHORTED"
+        elif spf >= 15:
+            short_float_label = "HIGH_SHORT_INTEREST"
+        elif spf >= 5:
+            short_float_label = "MODERATE_SHORT_INTEREST"
+        elif spf >= 2:
+            short_float_label = "LOW_SHORT_INTEREST"
+        else:
+            short_float_label = "MINIMAL_SHORT_INTEREST"
+
+        if dtc >= 10:
+            dtc_label = "EXTREME_DAYS_TO_COVER_SQUEEZE_RISK"
+        elif dtc >= 5:
+            dtc_label = "HIGH_DAYS_TO_COVER"
+        elif dtc >= 2:
+            dtc_label = "MODERATE_DAYS_TO_COVER"
+        else:
+            dtc_label = "LOW_DAYS_TO_COVER"
+
+        if mom_change >= 15:
+            mom_label = "STRONG_SHORT_BUILDING"; mom_score = 0
+        elif mom_change >= 5:
+            mom_label = "SHORT_BUILDING"; mom_score = 3
+        elif mom_change >= -5:
+            mom_label = "STABLE_SHORT_INTEREST"; mom_score = 8
+        elif mom_change >= -15:
+            mom_label = "SHORT_COVERING"; mom_score = 12
+        else:
+            mom_label = "STRONG_SHORT_COVERING"; mom_score = 15
+
+        if spf >= 30: sf_pts = 40
+        elif spf >= 20: sf_pts = 32
+        elif spf >= 10: sf_pts = 20
+        elif spf >= 5: sf_pts = 10
+        else: sf_pts = 3
+
+        if dtc >= 10: dtc_pts = 35
+        elif dtc >= 7: dtc_pts = 28
+        elif dtc >= 5: dtc_pts = 20
+        elif dtc >= 2: dtc_pts = 10
+        else: dtc_pts = 3
+
+        beta_pts = min(10, int(beta * 4))
+        squeeze_score = sf_pts + dtc_pts + mom_score + beta_pts
+
+        if squeeze_score >= 75: squeeze_risk = "EXTREME_SQUEEZE_RISK"
+        elif squeeze_score >= 55: squeeze_risk = "HIGH_SQUEEZE_RISK"
+        elif squeeze_score >= 35: squeeze_risk = "MODERATE_SQUEEZE_RISK"
+        else: squeeze_risk = "LOW_SQUEEZE_RISK"
+
+        import datetime
+        short_date_str = str(datetime.datetime.fromtimestamp(short_date).date()) if short_date else "N/A"
+
+        return {
+            "ticker": ticker.upper(),
+            "short_pct_of_float": round(spf, 2),
+            "short_float_label": short_float_label,
+            "shares_short": shares_short,
+            "shares_short_prior_month": shares_short_prev,
+            "mom_change_pct": round(mom_change, 2),
+            "mom_trend_label": mom_label,
+            "days_to_cover": round(dtc, 2),
+            "dtc_label": dtc_label,
+            "float_shares": shares_float,
+            "shares_outstanding": shares_outstanding,
+            "beta": round(beta, 2),
+            "squeeze_score": squeeze_score,
+            "squeeze_risk": squeeze_risk,
+            "score_breakdown": {"short_float_pts": sf_pts, "dtc_pts": dtc_pts, "mom_trend_pts": mom_score, "beta_pts": beta_pts},
+            "short_data_date": short_date_str,
+            "source": "Yahoo Finance — no API key required"
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_options_max_pain(ticker: str) -> dict:
+    """
+    Calculate options max pain: the strike where option writers have minimum
+    total dollar obligation at expiration. Analyzes up to 3 expirations within 45 DTE.
+    No API key required.
+    """
+    await Actor.charge(event_name="advanced_tool")
+    try:
+        import yfinance as yf
+        import datetime
+        stock = yf.Ticker(ticker.upper())
+        info = stock.info
+        current_price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose", 0)
+
+        expirations = stock.options
+        if not expirations:
+            return {"error": "No options data available"}
+
+        today = datetime.date.today()
+        valid_exps = []
+        for exp in expirations:
+            exp_date = datetime.datetime.strptime(exp, "%Y-%m-%d").date()
+            dte = (exp_date - today).days
+            if 0 < dte <= 45:
+                valid_exps.append((exp, dte))
+
+        valid_exps.sort(key=lambda x: x[1])
+        valid_exps = valid_exps[:3]
+
+        if not valid_exps:
+            return {"error": "No expirations within 45 DTE"}
+
+        results = []
+        for exp, dte in valid_exps:
+            chain = stock.option_chain(exp)
+            calls = chain.calls
+            puts = chain.puts
+
+            low_strike = current_price * 0.70
+            high_strike = current_price * 1.30
+            calls = calls[(calls["strike"] >= low_strike) & (calls["strike"] <= high_strike)]
+            puts = puts[(puts["strike"] >= low_strike) & (puts["strike"] <= high_strike)]
+
+            all_strikes = sorted(set(list(calls["strike"].values) + list(puts["strike"].values)))
+            if not all_strikes:
+                continue
+
+            pain_by_strike = {}
+            for strike in all_strikes:
+                call_pain = sum((strike - row["strike"]) * row["openInterest"] * 100
+                                for _, row in calls.iterrows() if row["strike"] < strike)
+                put_pain = sum((row["strike"] - strike) * row["openInterest"] * 100
+                               for _, row in puts.iterrows() if row["strike"] > strike)
+                pain_by_strike[strike] = call_pain + put_pain
+
+            if not pain_by_strike:
+                continue
+
+            max_pain_strike = min(pain_by_strike, key=pain_by_strike.get)
+            dist_pct = ((max_pain_strike - current_price) / current_price) * 100
+            pull_signal = ("MAX_PAIN_ABOVE_CURRENT_BULLISH_PULL" if dist_pct >= 3
+                          else "MAX_PAIN_BELOW_CURRENT_BEARISH_PULL" if dist_pct <= -3
+                          else "NEAR_MAX_PAIN_SIDEWAYS_PRESSURE")
+            abs_dist = abs(dist_pct)
+            pin_risk = "HIGH_PIN_RISK" if abs_dist <= 2 else "MODERATE_PIN_RISK" if abs_dist <= 5 else "LOW_PIN_RISK"
+
+            total_call_oi = int(calls["openInterest"].sum())
+            total_put_oi = int(puts["openInterest"].sum())
+            pc_oi_ratio = round(total_put_oi / total_call_oi, 3) if total_call_oi > 0 else 0
+            sorted_strikes = sorted(pain_by_strike.items(), key=lambda x: x[1])
+
+            results.append({
+                "expiration": exp, "dte": dte,
+                "max_pain_strike": max_pain_strike,
+                "current_price": round(current_price, 2),
+                "distance_from_current_pct": round(dist_pct, 2),
+                "pull_signal": pull_signal, "pin_risk": pin_risk,
+                "total_pain_at_max_pain_usd": round(pain_by_strike[max_pain_strike], 0),
+                "total_call_oi": total_call_oi, "total_put_oi": total_put_oi,
+                "pc_oi_ratio": pc_oi_ratio,
+                "lowest_pain_strikes_top5": [{"strike": s, "total_pain_usd": round(v, 0)} for s, v in sorted_strikes[:5]]
+            })
+
+        if not results:
+            return {"error": "Could not calculate max pain"}
+
+        primary = results[0]
+        strategy = (f"Max pain ${primary['max_pain_strike']} vs ${primary['current_price']} "
+                   f"({primary['distance_from_current_pct']:+.1f}%) → {primary['pull_signal']}. "
+                   f"Pin risk: {primary['pin_risk']}. Max pain gravitational pull strongest in final week.")
+
+        return {
+            "ticker": ticker.upper(),
+            "current_price": round(current_price, 2),
+            "primary_expiration": primary,
+            "all_expirations": results,
+            "strategy_guide": strategy,
+            "source": "Yahoo Finance — no API key required"
+        }
+    except Exception as e:
+        return {"error": str(e)}
